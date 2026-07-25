@@ -1,4 +1,5 @@
 #include "nasagui/CollapsibleDock.h"
+#include "nasagui/HudPanel.h"
 #include "nasagui/Theme.h"
 
 #include <QBoxLayout>
@@ -55,6 +56,34 @@ void CollapsibleDock::setContent(QWidget *content)
 {
     content->setParent(m_contentArea);
     m_contentArea->layout()->addWidget(content);
+    watchPanels(content);
+}
+
+void CollapsibleDock::watchPanels(QWidget *content)
+{
+    QList<HudPanel *> found = content->findChildren<HudPanel *>();
+    if (auto *panel = qobject_cast<HudPanel *>(content))
+        found.prepend(panel);
+    for (HudPanel *panel : found) {
+        if (m_watchedPanels.contains(panel))
+            continue;
+        m_watchedPanels.append(panel);
+        connect(panel, &HudPanel::panelClosed,
+                this, &CollapsibleDock::updatePanelsState);
+        connect(panel, &HudPanel::panelOpened,
+                this, &CollapsibleDock::updatePanelsState);
+    }
+}
+
+void CollapsibleDock::updatePanelsState()
+{
+    if (m_watchedPanels.isEmpty())
+        return;
+    bool anyOpen = false;
+    for (const auto &panel : m_watchedPanels)
+        if (panel && !panel->isHidden())
+            anyOpen = true;
+    setExpanded(anyOpen);
 }
 
 void CollapsibleDock::setExpandedSize(int px)

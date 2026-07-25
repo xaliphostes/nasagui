@@ -18,13 +18,14 @@ cmake --build build -j8
 ```
 
 `nasagui_demo --snapshot out.png` renders the dashboard for 2 s and saves a
-screenshot (works headless with `QT_QPA_PLATFORM=offscreen`).
+screenshot. (`QT_QPA_PLATFORM=offscreen` works headless but cannot create an
+OpenGL context, so the 3D viewport stays empty there.)
 
 ## Widgets
 
 | Widget            | Purpose                                                        |
 |-------------------|----------------------------------------------------------------|
-| `HudPanel`        | Container with translucent fill, corner brackets and a header. |
+| `HudPanel`        | Container with translucent fill, corner brackets and a header. `setClosable(true)` adds a ✕ that collapses the panel shut (animated); `openPanel()` expands it back; `panelClosed`/`panelOpened` signals keep menus in sync. |
 | `CollapsibleDock` | Edge-anchored collapsible container (Left/Right/Top/Bottom) with an always-visible toggle strip and animated slide. |
 | `CircularGauge`   | 270° arc gauge with ticks, glow arc and central readout.       |
 | `BarGauge`        | Vertical segmented level bar (fuel / O2 style).                |
@@ -32,6 +33,7 @@ screenshot (works headless with `QT_QPA_PLATFORM=offscreen`).
 | `StatusIndicator` | System name + status light (`Off/Nominal/Warning/Alert`; alert blinks). |
 | `HudButton`       | Flat bordered button with corner ticks and hover glow.         |
 | `RadarScope`      | Rotating-sweep radar with fading contacts.                     |
+| `ModelView`       | OpenGL 3D viewport (rim-lit fill + cyan wireframe + floor grid) with orbit camera: drag to orbit, wheel to zoom, idle auto-rotate. |
 
 ### Interactive controls (`Controls.h`)
 
@@ -96,6 +98,54 @@ middleLayout->addWidget(left);       // then addWidget(centralWidget, 1), right 
 
 left->setExpanded(false);            // programmatic collapse; toggle() also works
 ```
+
+### Closable panels + show/hide menu
+
+```cpp
+panel->setClosable(true);            // ✕ button in the header
+
+QAction *act = panelsMenu->addAction(panel->title());
+act->setCheckable(true);
+act->setChecked(true);
+QObject::connect(act, &QAction::toggled, panel, [panel](bool on) {
+    on ? panel->openPanel() : panel->closePanel();
+});
+QObject::connect(panel, &nasagui::HudPanel::panelClosed, act, [act] {
+    QSignalBlocker b(act); act->setChecked(false);   // ✕ keeps menu in sync
+});
+```
+
+The demo's Ops ▸ Panels submenu does exactly this for all ten panels. Build
+that submenu as a `HudMenu` (a `QMenu` subclass in `Controls.h`) and it stays
+open while checkable items are clicked, so several panels can be toggled in
+one visit.
+
+A `CollapsibleDock` watches the `HudPanel`s handed to `setContent()`: closing
+the last open panel auto-collapses the dock to its strip, and reopening any
+panel expands it again.
+
+### 3D model viewport
+
+`ModelView` renders any indexed triangle mesh; normals are computed for you
+and the orbit camera auto-fits the model:
+
+```cpp
+#include <nasagui/ModelView.h>
+#include "BunnyMesh.h"   // demo/BunnyMesh.h — embedded Stanford bunny
+
+// In main(), BEFORE constructing the QApplication (otherwise the widget's
+// GL context cannot share with the window's default context on macOS and
+// the viewport shows stale VRAM instead of the scene):
+nasagui::ModelView::setDefaultSurfaceFormat();
+
+auto *view = new nasagui::ModelView;
+view->setMesh(bunny::positions, bunny::vertexCount,
+              bunny::indices, bunny::indexCount);
+view->setAutoRotate(true);   // slow idle spin (default on)
+```
+
+Left-drag orbits, the wheel zooms; an AZ/EL/RNG readout overlays the corner.
+Requires the `Qt6::OpenGLWidgets` module (already linked by the library).
 
 ## Theming
 

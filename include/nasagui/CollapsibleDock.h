@@ -1,11 +1,14 @@
 #pragma once
 
+#include <QPointer>
 #include <QVariantAnimation>
+#include <QVector>
 #include <QWidget>
 
 namespace nasagui {
 
 class DockStrip;
+class HudPanel;
 
 // Edge-anchored collapsible container. A slim clickable strip (with rotated
 // title and chevrons) stays visible when collapsed; expanding/collapsing is
@@ -19,7 +22,10 @@ public:
     explicit CollapsibleDock(Edge edge, const QString &title,
                              QWidget *parent = nullptr);
 
-    void setContent(QWidget *content);   // reparented into the dock
+    // Reparented into the dock. Any HudPanel inside the content is watched:
+    // when the last one is closed the dock auto-collapses, and reopening a
+    // panel auto-expands it again.
+    void setContent(QWidget *content);
     void setExpandedSize(int px);        // width (Left/Right) or height (Top/Bottom)
 
     Edge edge() const { return m_edge; }
@@ -39,6 +45,8 @@ private:
         return m_edge == Edge::Left || m_edge == Edge::Right;
     }
     void applySize(int px);
+    void watchPanels(QWidget *content);
+    void updatePanelsState();
 
     Edge m_edge;
     QString m_title;
@@ -47,6 +55,7 @@ private:
     QWidget *m_contentArea = nullptr;
     DockStrip *m_strip = nullptr;
     QVariantAnimation *m_anim = nullptr;
+    QVector<QPointer<HudPanel>> m_watchedPanels;
 };
 
 // Internal: the always-visible toggle strip.

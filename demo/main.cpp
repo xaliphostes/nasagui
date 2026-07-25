@@ -4,11 +4,14 @@
 #include <nasagui/Controls.h>
 #include <nasagui/HudButton.h>
 #include <nasagui/HudPanel.h>
+#include <nasagui/ModelView.h>
 #include <nasagui/RadarScope.h>
 #include <nasagui/StatusIndicator.h>
 #include <nasagui/Style.h>
 #include <nasagui/TelemetryPlot.h>
 #include <nasagui/Theme.h>
+
+#include "BunnyMesh.h"
 
 #include <QActionGroup>
 #include <QApplication>
@@ -32,7 +35,7 @@ public:
     MissionWindow()
     {
         setWindowTitle("NASA-GUI // Mission Operations");
-        resize(1380, 860);
+        resize(1500, 880);
         buildUi();
 
         connect(&m_dataTimer, &QTimer::timeout, this, [this] { tick(); });
@@ -44,6 +47,8 @@ public:
         updateClock();
         appendLog();
     }
+
+    const QVector<HudPanel *> &panels() const { return m_hudPanels; }
 
     CollapsibleDock *dock(CollapsibleDock::Edge edge) const
     {
@@ -71,6 +76,36 @@ protected:
     }
 
 private:
+    HudPanel *registerPanel(HudPanel *panel)
+    {
+        panel->setClosable(true);
+        m_hudPanels.append(panel);
+        return panel;
+    }
+
+    void populatePanelsMenu()
+    {
+        for (HudPanel *panel : m_hudPanels) {
+            QAction *act = m_panelsMenu->addAction(panel->title());
+            act->setCheckable(true);
+            act->setChecked(true);
+            connect(act, &QAction::toggled, panel, [panel](bool on) {
+                if (on)
+                    panel->openPanel();
+                else
+                    panel->closePanel();
+            });
+            connect(panel, &HudPanel::panelClosed, act, [act] {
+                QSignalBlocker blocker(act);
+                act->setChecked(false);
+            });
+            connect(panel, &HudPanel::panelOpened, act, [act] {
+                QSignalBlocker blocker(act);
+                act->setChecked(true);
+            });
+        }
+    }
+
     void buildUi()
     {
         auto *root = new QVBoxLayout(this);
@@ -138,6 +173,8 @@ private:
         bottomLay->addWidget(buildConfigPanel());
         m_bottomDock->setContent(bottom);
         root->addWidget(m_bottomDock);
+
+        populatePanelsMenu();
     }
 
     QWidget *buildOpsMenuButton()
@@ -146,6 +183,9 @@ private:
         auto *menu = new QMenu(ops);
         menu->addAction("Snapshot Telemetry");
         menu->addAction("Export Event Log");
+        menu->addSeparator();
+        m_panelsMenu = new HudMenu("Panels", menu);   // stays open while toggling
+        menu->addMenu(m_panelsMenu);
         menu->addSeparator();
         auto *night = menu->addAction("Night Mode");
         night->setCheckable(true);
@@ -169,7 +209,7 @@ private:
 
     QWidget *buildConfigPanel()
     {
-        auto *panel = new HudPanel("Flight Config");
+        auto *panel = registerPanel(new HudPanel("Flight Config"));
         auto *lay = new QHBoxLayout(panel);
         lay->setSpacing(28);
 
@@ -239,7 +279,7 @@ private:
 
     QWidget *buildTimelinePanel()
     {
-        auto *panel = new HudPanel("Mission Timeline");
+        auto *panel = registerPanel(new HudPanel("Mission Timeline"));
         auto *lay = new QHBoxLayout(panel);
         const char *phases[] = {"Launch", "Ascent", "Orbit", "Trans-Mars", "EDL"};
         const int active = 2;
@@ -269,7 +309,7 @@ private:
 
     QWidget *buildPropulsionPanel()
     {
-        auto *panel = new HudPanel("Propulsion");
+        auto *panel = registerPanel(new HudPanel("Propulsion"));
         auto *lay = new QHBoxLayout(panel);
         m_thrust = new CircularGauge;
         m_thrust->setRange(0, 100);
@@ -289,7 +329,7 @@ private:
 
     QWidget *buildReservesPanel()
     {
-        auto *panel = new HudPanel("Reserves");
+        auto *panel = registerPanel(new HudPanel("Reserves"));
         auto *lay = new QHBoxLayout(panel);
         const char *names[] = {"O2", "H2O", "Fuel"};
         for (int i = 0; i < 3; ++i) {
@@ -310,14 +350,27 @@ private:
         lay->setContentsMargins(0, 0, 0, 0);
         lay->setSpacing(10);
 
-        auto *telemetry = new HudPanel("Telemetry // Altitude");
+        auto *topRow = new QHBoxLayout;
+        topRow->setSpacing(10);
+
+        auto *telemetry = registerPanel(new HudPanel("Telemetry // Altitude"));
         auto *telLay = new QVBoxLayout(telemetry);
         m_plot = new TelemetryPlot;
         m_plot->setUnits("KM");
         telLay->addWidget(m_plot);
-        lay->addWidget(telemetry, 1);
+        topRow->addWidget(telemetry, 1);
 
-        auto *systems = new HudPanel("Systems");
+        auto *model = registerPanel(new HudPanel("Model // Stanford Bunny"));
+        auto *modelLay = new QVBoxLayout(model);
+        auto *bunnyView = new ModelView;
+        bunnyView->setMesh(bunny::positions, bunny::vertexCount,
+                           bunny::indices, bunny::indexCount);
+        modelLay->addWidget(bunnyView);
+        topRow->addWidget(model, 1);
+
+        lay->addLayout(topRow, 1);
+
+        auto *systems = registerPanel(new HudPanel("Systems"));
         auto *sysLay = new QVBoxLayout(systems);
         auto *sysGrid = new QGridLayout;
         sysGrid->setHorizontalSpacing(24);
@@ -354,7 +407,7 @@ private:
 
     QWidget *buildRadarPanel()
     {
-        auto *panel = new HudPanel("Proximity Scan");
+        auto *panel = registerPanel(new HudPanel("Proximity Scan"));
         auto *lay = new QVBoxLayout(panel);
         auto *scope = new RadarScope;
         auto *rng = QRandomGenerator::global();
@@ -366,7 +419,7 @@ private:
 
     QWidget *buildCabinPanel()
     {
-        auto *panel = new HudPanel("Cabin");
+        auto *panel = registerPanel(new HudPanel("Cabin"));
         auto *lay = new QVBoxLayout(panel);
         m_pressure = new CircularGauge;
         m_pressure->setRange(0, 120);
@@ -379,7 +432,7 @@ private:
 
     QWidget *buildLogPanel()
     {
-        auto *panel = new HudPanel("Console // Event Log");
+        auto *panel = registerPanel(new HudPanel("Console // Event Log"));
         auto *lay = new QVBoxLayout(panel);
         m_log = new QPlainTextEdit;
         m_log->setReadOnly(true);
@@ -438,6 +491,9 @@ private:
     int m_elapsed = 0;
     int m_logIndex = 0;
 
+    QVector<HudPanel *> m_hudPanels;
+    QMenu *m_panelsMenu = nullptr;
+
     CollapsibleDock *m_topDock = nullptr;
     CollapsibleDock *m_bottomDock = nullptr;
     CollapsibleDock *m_leftDock = nullptr;
@@ -455,6 +511,7 @@ private:
 
 int main(int argc, char *argv[])
 {
+    ModelView::setDefaultSurfaceFormat();   // before QApplication
     QApplication app(argc, argv);
     applyTheme(app);
 
@@ -467,6 +524,16 @@ int main(int argc, char *argv[])
     const int idx = args.indexOf("--snapshot");
     if (idx >= 0 && idx + 1 < args.size()) {
         const QString path = args.at(idx + 1);
+        if (args.contains("--close-test")) {
+            QTimer::singleShot(700, &window, [&window] {
+                for (auto *panel : window.panels())
+                    if (panel->title().startsWith("Telemetry")
+                        || panel->title() == "Reserves"
+                        || panel->title().startsWith("Console")
+                        || panel->title() == "Flight Config")
+                        panel->closePanel();
+            });
+        }
         if (args.contains("--collapse")) {
             QTimer::singleShot(800, &window, [&window] {
                 window.dock(CollapsibleDock::Edge::Left)->setExpanded(false);

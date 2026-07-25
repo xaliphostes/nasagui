@@ -371,6 +371,19 @@ void HudDial::paintEvent(QPaintEvent *)
     p.drawEllipse(c, 3.0, 3.0);
 }
 
+// ---- HudMenu ---------------------------------------------------------------
+
+void HudMenu::mouseReleaseEvent(QMouseEvent *event)
+{
+    QAction *action = actionAt(event->pos());
+    if (action && action->isCheckable() && action->isEnabled()) {
+        action->trigger();   // toggle without closing the menu
+        event->accept();
+        return;
+    }
+    QMenu::mouseReleaseEvent(event);
+}
+
 // ---- HudLabel --------------------------------------------------------------
 
 HudLabel::HudLabel(const QString &text, Role role, QWidget *parent)

@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGLWidgets)
 
 # Qt 6.8 links the AGL framework, which recent macOS SDKs no longer ship.
 if(APPLE AND TARGET WrapOpenGL::WrapOpenGL)
@@ -23,6 +23,7 @@ add_library(nasagui STATIC
     include/nasagui/HudPanel.h
     include/nasagui/CollapsibleDock.h
     include/nasagui/Controls.h
+    include/nasagui/ModelView.h
     include/nasagui/CircularGauge.h
     include/nasagui/BarGauge.h
     include/nasagui/TelemetryPlot.h
@@ -34,6 +35,7 @@ add_library(nasagui STATIC
     src/HudPanel.cpp
     src/CollapsibleDock.cpp
     src/Controls.cpp
+    src/ModelView.cpp
     src/CircularGauge.cpp
     src/BarGauge.cpp
     src/TelemetryPlot.cpp
@@ -42,7 +44,7 @@ add_library(nasagui STATIC
     src/RadarScope.cpp
 )
 target_include_directories(nasagui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(nasagui PUBLIC Qt6::Widgets)
+target_link_libraries(nasagui PUBLIC Qt6::Widgets Qt6::OpenGLWidgets)
 
 add_executable(nasagui_demo demo/main.cpp)
 target_link_libraries(nasagui_demo PRIVATE nasagui)

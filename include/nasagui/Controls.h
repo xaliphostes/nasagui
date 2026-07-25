@@ -6,6 +6,7 @@
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QRadioButton>
 #include <QSlider>
 
@@ -106,6 +107,19 @@ public:
 
 protected:
     void paintEvent(QPaintEvent *event) override;
+};
+
+// QMenu that stays open when a checkable action is clicked, so several
+// items can be toggled in one visit (show/hide lists, option sets, ...).
+// Non-checkable actions close the menu as usual.
+class HudMenu : public QMenu
+{
+    Q_OBJECT
+public:
+    using QMenu::QMenu;
+
+protected:
+    void mouseReleaseEvent(QMouseEvent *event) override;
 };
 
 // QLabel preconfigured for a typographic role of the theme.
