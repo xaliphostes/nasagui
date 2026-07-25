@@ -5,6 +5,10 @@ interfaces (inspired by modern NASA dashboard concepts and Territory Studio's
 *The Martian* screen graphics): dark space-blue background, glowing cyan
 primaries, amber warnings, corner-bracketed panels and monospaced readouts.
 
+<center>
+    <img src="media/screen.jpg" width="800"/><br>
+</center><br/><br/>
+
 ## Build
 
 ```sh
