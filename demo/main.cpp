@@ -365,7 +365,47 @@ private:
         auto *bunnyView = new ModelView;
         bunnyView->setMesh(bunny::positions, bunny::vertexCount,
                            bunny::indices, bunny::indexCount);
-        modelLay->addWidget(bunnyView);
+
+        // Per-vertex scalar = one coordinate component of the mesh
+        auto componentScalars = [](int comp) {
+            QVector<float> values;
+            values.resize(int(bunny::vertexCount));
+            for (int v = 0; v < int(bunny::vertexCount); ++v)
+                values[v] = bunny::positions[3 * v + comp];
+            return values;
+        };
+        bunnyView->setScalars(componentScalars(2), "Z");
+        modelLay->addWidget(bunnyView, 1);
+
+        auto *modelBar = new QHBoxLayout;
+        modelBar->setSpacing(8);
+        modelBar->addWidget(new HudLabel("Attribute"));
+        auto *attr = new HudComboBox;
+        attr->addItems({"X", "Y", "Z", "None"});
+        attr->setCurrentIndex(2);
+        attr->setFixedWidth(90);
+        connect(attr, &QComboBox::currentIndexChanged, bunnyView,
+                [bunnyView, componentScalars](int index) {
+                    if (index >= 3)
+                        bunnyView->clearScalars();
+                    else
+                        bunnyView->setScalars(componentScalars(index),
+                                              QString(QChar('X' + index)));
+                });
+        modelBar->addWidget(attr);
+        modelBar->addSpacing(12);
+        modelBar->addWidget(new HudLabel("Color Table"));
+        auto *cmap = new HudComboBox;
+        cmap->addItems({"Viridis", "Cool-Warm", "Ice", "Thermal"});
+        cmap->setFixedWidth(110);
+        connect(cmap, &QComboBox::currentIndexChanged, bunnyView,
+                [bunnyView](int index) {
+                    bunnyView->setColorMap(
+                        static_cast<ModelView::ColorMap>(index));
+                });
+        modelBar->addWidget(cmap);
+        modelBar->addStretch();
+        modelLay->addLayout(modelBar);
         topRow->addWidget(model, 1);
 
         lay->addLayout(topRow, 1);

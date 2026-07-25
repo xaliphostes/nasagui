@@ -3,9 +3,11 @@
 
 #include <QMouseEvent>
 #include <QOpenGLShaderProgram>
+#include <QOpenGLTexture>
 #include <QPainter>
 #include <QWheelEvent>
 #include <QtMath>
+#include <algorithm>
 
 namespace nasagui {
 
@@ -14,29 +16,45 @@ namespace {
 const char *kLitVertexShader = R"(#version 330 core
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
+layout(location = 2) in float aScalar;
 uniform mat4 uMvp;
 uniform mat4 uMv;
 uniform mat3 uNormalMatrix;
 out vec3 vNormal;
 out vec3 vViewPos;
+out float vScalar;
 void main() {
     vNormal = normalize(uNormalMatrix * aNormal);
     vViewPos = (uMv * vec4(aPos, 1.0)).xyz;
+    vScalar = aScalar;
     gl_Position = uMvp * vec4(aPos, 1.0);
 })";
 
 const char *kLitFragmentShader = R"(#version 330 core
 in vec3 vNormal;
 in vec3 vViewPos;
+in float vScalar;
 uniform vec3 uBase;
 uniform vec3 uGlow;
+uniform bool uUseScalars;
+uniform float uScalarMin;
+uniform float uScalarMax;
+uniform sampler2D uLut;
 out vec4 fragColor;
 void main() {
     vec3 n = normalize(vNormal);
     vec3 v = normalize(-vViewPos);
     float diff = max(dot(n, normalize(vec3(0.4, 0.8, 0.6))), 0.0);
     float rim = pow(1.0 - max(dot(n, v), 0.0), 2.2);
-    vec3 c = uBase * (0.35 + 0.65 * diff) + uGlow * rim * 0.9;
+    vec3 base = uBase;
+    float rimGain = 0.9;
+    if (uUseScalars) {
+        float t = clamp((vScalar - uScalarMin) / max(uScalarMax - uScalarMin, 1e-9),
+                        0.0, 1.0);
+        base = texture(uLut, vec2(t, 0.5)).rgb;
+        rimGain = 0.25;                  // keep colors readable
+    }
+    vec3 c = base * (0.45 + 0.55 * diff) + uGlow * rim * rimGain;
     fragColor = vec4(c, 1.0);
 })";
 
@@ -49,6 +67,40 @@ const char *kFlatFragmentShader = R"(#version 330 core
 uniform vec4 uColor;
 out vec4 fragColor;
 void main() { fragColor = uColor; })";
+
+QGradientStops presetStops(ModelView::ColorMap map)
+{
+    using M = ModelView::ColorMap;
+    switch (map) {
+    case M::Viridis:
+        return {{0.00, QColor(68, 1, 84)},    {0.15, QColor(72, 36, 117)},
+                {0.30, QColor(65, 68, 135)},  {0.45, QColor(52, 96, 141)},
+                {0.60, QColor(41, 120, 142)}, {0.75, QColor(34, 144, 141)},
+                {0.85, QColor(68, 176, 122)}, {0.95, QColor(160, 218, 57)},
+                {1.00, QColor(253, 231, 37)}};
+    case M::CoolWarm:
+        return {{0.0, QColor(59, 76, 192)},   {0.5, QColor(221, 221, 221)},
+                {1.0, QColor(180, 4, 38)}};
+    case M::Ice:
+        return {{0.0, QColor(6, 11, 18)},     {0.4, QColor(26, 109, 133)},
+                {0.75, QColor(53, 214, 237)}, {1.0, QColor(230, 250, 255)}};
+    case M::Thermal:
+        return {{0.00, QColor(4, 0, 10)},     {0.30, QColor(87, 16, 110)},
+                {0.60, QColor(188, 55, 84)},  {0.80, QColor(243, 133, 25)},
+                {1.00, QColor(252, 230, 140)}};
+    }
+    return {};
+}
+
+QImage lutImage(const QGradientStops &stops)
+{
+    QImage img(256, 1, QImage::Format_RGBA8888);
+    QPainter p(&img);
+    QLinearGradient g(0, 0, img.width(), 0);
+    g.setStops(stops);
+    p.fillRect(img.rect(), g);
+    return img;
+}
 
 } // namespace
 
@@ -67,6 +119,7 @@ ModelView::ModelView(QWidget *parent)
     : QOpenGLWidget(parent)
 {
     setCursor(Qt::OpenHandCursor);
+    m_lutStops = presetStops(ColorMap::Viridis);
 
     m_spinTimer.setInterval(33);
     connect(&m_spinTimer, &QTimer::timeout, this, [this] {
@@ -81,8 +134,10 @@ ModelView::ModelView(QWidget *parent)
 ModelView::~ModelView()
 {
     makeCurrent();
+    delete m_lut;
     m_vbo.destroy();
     m_ibo.destroy();
+    m_scalarVbo.destroy();
     m_gridVbo.destroy();
     m_meshVao.destroy();
     m_gridVao.destroy();
@@ -98,6 +153,59 @@ void ModelView::setAutoRotate(bool on)
         m_spinTimer.start();
     else
         m_spinTimer.stop();
+}
+
+void ModelView::setScalars(const QVector<float> &values, const QString &name)
+{
+    m_scalars = values;
+    m_scalarName = name;
+    if (m_autoScalarRange && !m_scalars.isEmpty()) {
+        const auto [lo, hi] = std::minmax_element(m_scalars.cbegin(),
+                                                  m_scalars.cend());
+        m_scalarMin = *lo;
+        m_scalarMax = *hi;
+    }
+    m_meshDirty = true;
+    update();
+}
+
+void ModelView::clearScalars()
+{
+    m_scalars.clear();
+    m_meshDirty = true;
+    update();
+}
+
+void ModelView::setScalarRange(float min, float max)
+{
+    m_scalarMin = min;
+    m_scalarMax = qMax(max, min + 1e-9f);
+    m_autoScalarRange = false;
+    update();
+}
+
+void ModelView::resetScalarRange()
+{
+    m_autoScalarRange = true;
+    if (!m_scalars.isEmpty()) {
+        const auto [lo, hi] = std::minmax_element(m_scalars.cbegin(),
+                                                  m_scalars.cend());
+        m_scalarMin = *lo;
+        m_scalarMax = *hi;
+    }
+    update();
+}
+
+void ModelView::setColorMap(ColorMap map)
+{
+    setColorMap(presetStops(map));
+}
+
+void ModelView::setColorMap(const QGradientStops &stops)
+{
+    m_lutStops = stops;
+    m_lutDirty = true;
+    update();
 }
 
 void ModelView::setMesh(const float *positions, std::size_t vertexCount,
@@ -178,6 +286,21 @@ void ModelView::uploadMesh()
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
                           reinterpret_cast<void *>(3 * sizeof(float)));
 
+    // Optional per-vertex scalar attribute
+    const bool hasScalars =
+        m_scalars.size() * 6 == m_interleaved.size() && !m_scalars.isEmpty();
+    if (hasScalars) {
+        if (!m_scalarVbo.isCreated())
+            m_scalarVbo.create();
+        m_scalarVbo.bind();
+        m_scalarVbo.allocate(m_scalars.constData(),
+                             int(m_scalars.size() * sizeof(float)));
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(float), nullptr);
+    } else {
+        glDisableVertexAttribArray(2);
+    }
+
     if (!m_ibo.isCreated())
         m_ibo.create();
     m_ibo.bind();
@@ -256,6 +379,17 @@ void ModelView::paintGL()
     glDrawArrays(GL_LINES, 0, m_gridVertexCount);
     m_gridVao.release();
 
+    // Color table texture
+    const bool useScalars =
+        m_scalars.size() * 6 == m_interleaved.size() && !m_scalars.isEmpty();
+    if (m_lutDirty || !m_lut) {
+        delete m_lut;
+        m_lut = new QOpenGLTexture(lutImage(m_lutStops));
+        m_lut->setMinMagFilters(QOpenGLTexture::Linear, QOpenGLTexture::Linear);
+        m_lut->setWrapMode(QOpenGLTexture::ClampToEdge);
+        m_lutDirty = false;
+    }
+
     // Solid fill, offset back so the wireframe stays visible on top
     m_litProgram->bind();
     m_litProgram->setUniformValue("uMvp", mvp);
@@ -265,6 +399,11 @@ void ModelView::paintGL()
     const QColor glow = Theme::Primary;
     m_litProgram->setUniformValue(
         "uGlow", QVector3D(glow.redF(), glow.greenF(), glow.blueF()));
+    m_litProgram->setUniformValue("uUseScalars", useScalars);
+    m_litProgram->setUniformValue("uScalarMin", m_scalarMin);
+    m_litProgram->setUniformValue("uScalarMax", m_scalarMax);
+    m_lut->bind(0);
+    m_litProgram->setUniformValue("uLut", 0);
     m_meshVao.bind();
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(1.0f, 1.0f);
@@ -295,6 +434,32 @@ void ModelView::paintGL()
                                  m_elevation, m_distance));
     p.drawText(QRectF(8, height() - 22, width() - 16, 16),
                Qt::AlignRight | Qt::AlignVCenter, "DRAG ORBIT / WHEEL ZOOM");
+
+    // Colorbar legend
+    if (useScalars) {
+        const QRectF bar(width() - 26.0, height() * 0.24, 10.0, height() * 0.5);
+        QLinearGradient g(bar.bottomLeft(), bar.topLeft());
+        g.setStops(m_lutStops);
+        p.fillRect(bar, g);
+        p.setPen(QPen(Theme::PanelBorder, 1.0));
+        p.drawRect(bar);
+
+        p.setPen(Theme::TextDim);
+        p.setFont(Theme::valueFont(7));
+        const QRectF maxRect(bar.left() - 60, bar.top() - 16, bar.width() + 60, 14);
+        const QRectF minRect(bar.left() - 60, bar.bottom() + 2, bar.width() + 60, 14);
+        p.drawText(maxRect, Qt::AlignRight | Qt::AlignVCenter,
+                   QString::number(m_scalarMax, 'g', 3));
+        p.drawText(minRect, Qt::AlignRight | Qt::AlignVCenter,
+                   QString::number(m_scalarMin, 'g', 3));
+        if (!m_scalarName.isEmpty()) {
+            p.setPen(Theme::TextPrimary);
+            p.setFont(Theme::titleFont(7));
+            p.drawText(QRectF(bar.left() - 60, maxRect.top() - 16,
+                              bar.width() + 60, 14),
+                       Qt::AlignRight | Qt::AlignVCenter, m_scalarName.toUpper());
+        }
+    }
 }
 
 void ModelView::mousePressEvent(QMouseEvent *event)

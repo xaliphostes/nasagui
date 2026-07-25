@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QBrush>
 #include <QMatrix4x4>
 #include <QOpenGLBuffer>
 #include <QOpenGLFunctions>
@@ -10,6 +11,7 @@
 #include <QVector>
 
 class QOpenGLShaderProgram;
+class QOpenGLTexture;
 
 namespace nasagui {
 
@@ -34,6 +36,19 @@ public:
 
     void setAutoRotate(bool on);
 
+    // ---- Scalar field ("plot an attribute with a color table") ----------
+    enum class ColorMap { Viridis, CoolWarm, Ice, Thermal };
+
+    // One value per vertex; the mesh is colored through the current color
+    // table and a colorbar legend appears. The range is min/max of the data
+    // unless setScalarRange() was called.
+    void setScalars(const QVector<float> &values, const QString &name = {});
+    void clearScalars();                       // back to plain shaded fill
+    void setScalarRange(float min, float max); // fixed mapping range
+    void resetScalarRange();                   // auto range from the data
+    void setColorMap(ColorMap map);
+    void setColorMap(const QGradientStops &stops);   // custom table
+
     QSize sizeHint() const override { return {320, 240}; }
     QSize minimumSizeHint() const override { return {160, 120}; }
 
@@ -52,6 +67,17 @@ private:
     QVector<float> m_interleaved;
     QVector<unsigned int> m_indices;
     bool m_meshDirty = false;
+
+    // Scalar field
+    QVector<float> m_scalars;
+    QString m_scalarName;
+    float m_scalarMin = 0.0f;
+    float m_scalarMax = 1.0f;
+    bool m_autoScalarRange = true;
+    QGradientStops m_lutStops;
+    QOpenGLTexture *m_lut = nullptr;
+    bool m_lutDirty = true;
+    QOpenGLBuffer m_scalarVbo{QOpenGLBuffer::VertexBuffer};
     QVector3D m_center;
     float m_radius = 1.0f;
     float m_floorY = 0.0f;
