@@ -64,6 +64,22 @@ void applyTheme(QApplication &app)
             selection-background-color: rgba(53, 214, 237, 40);
             selection-color: #35d6ed;
         }
+        QTreeView, QTreeWidget, QListView {
+            background: transparent; border: none;
+            color: #d7e7ef; outline: 0;
+        }
+        QTreeView::item, QListView::item { padding: 4px 2px; }
+        QTreeView::item:hover, QListView::item:hover {
+            background: rgba(53, 214, 237, 15);
+        }
+        QTreeView::item:selected, QListView::item:selected {
+            background: rgba(53, 214, 237, 40); color: #35d6ed;
+        }
+        QTreeView::branch { background: transparent; }
+        QHeaderView::section {
+            background: #0a141f; color: #6f8a99;
+            border: 1px solid #1d3a4d; padding: 4px 6px;
+        }
         QMenuBar {
             background-color: #060b12; color: #d7e7ef;
             border-bottom: 1px solid #1d3a4d;

@@ -147,6 +147,35 @@ view->setAutoRotate(true);   // slow idle spin (default on)
 Left-drag orbits, the wheel zooms; an AZ/EL/RNG readout overlays the corner.
 Requires the `Qt6::OpenGLWidgets` module (already linked by the library).
 
+## VTK demo (`nasagui_vtk_demo`)
+
+A second demo — a HUD-styled 3D model explorer built on VTK:
+
+- **3D viewport** (`QVTKOpenGLNativeWidget`, trackball camera) in the center.
+- **Scene tree** (left dock) listing all loaded objects + a *Load Model…*
+  button for `*.vtk`, `*.vtp`, `*.ply`, `*.obj` and **Gocad TSurf** `*.ts`
+  files (a minimal TSurf reader lives in `demo-vtk/TSurfReader.cpp`; its
+  PROPERTIES columns become plottable point-data arrays).
+- **Properties panel** (right dock) for the selected object: visibility,
+  solid color, representation (surface / surface+edges / wireframe / points),
+  attribute to plot (any 1-component point array, incl. auto-added X/Y/Z),
+  color table (Viridis / Cool-Warm / Ice / Thermal) and opacity.
+- Extra CLI arguments are loaded as models on startup:
+  `./nasagui_vtk_demo demo-vtk/data/sample_horizon.ts`
+
+It builds only when CMake finds a VTK compiled against the **same Qt** as
+this project:
+
+```sh
+cmake -S . -B build-vtk \
+  -DCMAKE_PREFIX_PATH="$HOME/Qt/6.5.3/macos;$HOME/vtk/build_qt6"
+cmake --build build-vtk -j8
+./build-vtk/nasagui_vtk_demo
+```
+
+(The plain `build/` dir can keep using Qt 6.8.3; mixing two Qt versions in
+one process is not possible, hence the separate build directory.)
+
 ## Theming
 
 All colors and fonts live in `include/nasagui/Theme.h`

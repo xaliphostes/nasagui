@@ -48,3 +48,23 @@ target_link_libraries(nasagui PUBLIC Qt6::Widgets Qt6::OpenGLWidgets)
 
 add_executable(nasagui_demo demo/main.cpp)
 target_link_libraries(nasagui_demo PRIVATE nasagui)
+
+# Optional VTK demo (3D model explorer). Needs a VTK built against the SAME
+# Qt as this project, e.g.:
+#   cmake -B build-vtk -DCMAKE_PREFIX_PATH="$HOME/Qt/6.5.3/macos;$HOME/vtk/build_qt6"
+find_package(VTK QUIET COMPONENTS
+    CommonColor CommonComputationalGeometry CommonCore CommonDataModel
+    FiltersCore FiltersSources GUISupportQt InteractionStyle
+    IOGeometry IOLegacy IOPLY IOXML
+    RenderingCore RenderingOpenGL2)
+if(VTK_FOUND)
+    message(STATUS "VTK ${VTK_VERSION} found - building nasagui_vtk_demo")
+    add_executable(nasagui_vtk_demo
+        demo-vtk/main.cpp
+        demo-vtk/TSurfReader.h
+        demo-vtk/TSurfReader.cpp)
+    target_link_libraries(nasagui_vtk_demo PRIVATE nasagui ${VTK_LIBRARIES})
+    vtk_module_autoinit(TARGETS nasagui_vtk_demo MODULES ${VTK_LIBRARIES})
+else()
+    message(STATUS "VTK not found - skipping nasagui_vtk_demo (set VTK_DIR or CMAKE_PREFIX_PATH)")
+endif()
