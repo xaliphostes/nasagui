@@ -12,7 +12,9 @@ class HudButton : public QPushButton
 public:
     explicit HudButton(const QString &text, QWidget *parent = nullptr);
 
+    // An invalid colour (the default) follows the current style's Theme::Primary.
     void setAccent(const QColor &accent);
+    QColor accent() const;
 
     QSize sizeHint() const override { return {112, 34}; }
 

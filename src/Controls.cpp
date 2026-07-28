@@ -53,7 +53,7 @@ void HudCheckBox::paintEvent(QPaintEvent *)
     const bool hovered = underMouse() && isEnabled();
     const QRectF box(1.5, height() / 2.0 - 7, 14, 14);
 
-    p.fillRect(box, QColor(0x0a, 0x14, 0x1f));
+    p.fillRect(box, Theme::FieldFill);
     p.setPen(QPen(on || hovered ? Theme::Primary : Theme::PanelBorder, 1.2));
     p.drawRect(box);
 
@@ -97,7 +97,7 @@ void HudRadioButton::paintEvent(QPaintEvent *)
     const bool hovered = underMouse() && isEnabled();
     const QPointF c(9.0, height() / 2.0);
 
-    p.setBrush(QColor(0x0a, 0x14, 0x1f));
+    p.setBrush(Theme::FieldFill);
     p.setPen(QPen(on || hovered ? Theme::Primary : Theme::PanelBorder, 1.2));
     p.drawEllipse(c, 7.0, 7.0);
 
@@ -138,7 +138,7 @@ void HudComboBox::paintEvent(QPaintEvent *)
     const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     const bool active = (underMouse() || hasFocus()) && isEnabled();
 
-    p.fillRect(r, QColor(0x0a, 0x14, 0x1f));
+    p.fillRect(r, Theme::FieldFill);
     p.setPen(QPen(active ? Theme::Primary : Theme::PanelBorder, 1.0));
     p.drawRect(r);
 
@@ -384,12 +384,68 @@ void HudMenu::mouseReleaseEvent(QMouseEvent *event)
     QMenu::mouseReleaseEvent(event);
 }
 
+// ---- HudSplitter -----------------------------------------------------------
+
+namespace {
+
+class HudSplitterHandle : public QSplitterHandle
+{
+public:
+    using QSplitterHandle::QSplitterHandle;
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        // A Qt::Vertical splitter stacks children, so its handle is a
+        // horizontal bar (and vice versa).
+        const bool horizontalBar = orientation() == Qt::Vertical;
+        const QPointF c(width() / 2.0, height() / 2.0);
+
+        p.setPen(QPen(Theme::GridLine, 1.0));
+        if (horizontalBar)
+            p.drawLine(QPointF(4, c.y()), QPointF(width() - 4, c.y()));
+        else
+            p.drawLine(QPointF(c.x(), 4), QPointF(c.x(), height() - 4));
+
+        const QColor grip = underMouse() ? Theme::Primary : Theme::TextDim;
+        p.setPen(QPen(grip, 2.0));
+        for (int i = -1; i <= 1; ++i) {
+            if (horizontalBar)
+                p.drawLine(QPointF(c.x() + i * 12 - 4, c.y()),
+                           QPointF(c.x() + i * 12 + 4, c.y()));
+            else
+                p.drawLine(QPointF(c.x(), c.y() + i * 12 - 4),
+                           QPointF(c.x(), c.y() + i * 12 + 4));
+        }
+    }
+    void enterEvent(QEnterEvent *) override { update(); }
+    void leaveEvent(QEvent *) override { update(); }
+};
+
+} // namespace
+
+HudSplitter::HudSplitter(Qt::Orientation orientation, QWidget *parent)
+    : QSplitter(orientation, parent)
+{
+    setHandleWidth(9);
+    setChildrenCollapsible(false);
+}
+
+QSplitterHandle *HudSplitter::createHandle()
+{
+    return new HudSplitterHandle(orientation(), this);
+}
+
 // ---- HudLabel --------------------------------------------------------------
 
 HudLabel::HudLabel(const QString &text, Role role, QWidget *parent)
     : QLabel(text, parent)
     , m_role(role)
 {
+    connect(Theme::Notifier::instance(), &Theme::Notifier::styleChanged,
+            this, &HudLabel::apply);
     apply();
 }
 
@@ -405,26 +461,35 @@ void HudLabel::setAccent(const QColor &color)
     apply();
 }
 
+void HudLabel::setPointSize(int pointSize)
+{
+    m_pointSize = qMax(0, pointSize);
+    apply();
+}
+
 void HudLabel::apply()
 {
+    // 0 keeps the role's default size.
+    const auto sized = [this](int def) { return m_pointSize ? m_pointSize : def; };
+
     QColor color;
     switch (m_role) {
     case Role::Title:
-        setFont(Theme::titleFont(11));
+        setFont(Theme::titleFont(sized(11)));
         color = Theme::TextPrimary;
         setText(text().toUpper());
         break;
     case Role::Caption:
-        setFont(Theme::titleFont(8));
+        setFont(Theme::titleFont(sized(8)));
         color = Theme::TextDim;
         setText(text().toUpper());
         break;
     case Role::Value:
-        setFont(Theme::valueFont(13));
+        setFont(Theme::valueFont(sized(13)));
         color = Theme::TextPrimary;
         break;
     case Role::Unit:
-        setFont(Theme::labelFont(8));
+        setFont(Theme::labelFont(sized(8)));
         color = Theme::TextDim;
         break;
     }

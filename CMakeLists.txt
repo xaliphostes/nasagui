@@ -23,6 +23,7 @@ add_library(nasagui STATIC
     include/nasagui/HudPanel.h
     include/nasagui/CollapsibleDock.h
     include/nasagui/Controls.h
+    include/nasagui/LayoutStore.h
     include/nasagui/ModelView.h
     include/nasagui/CircularGauge.h
     include/nasagui/BarGauge.h
@@ -35,6 +36,7 @@ add_library(nasagui STATIC
     src/HudPanel.cpp
     src/CollapsibleDock.cpp
     src/Controls.cpp
+    src/LayoutStore.cpp
     src/ModelView.cpp
     src/CircularGauge.cpp
     src/BarGauge.cpp
@@ -61,8 +63,15 @@ if(VTK_FOUND)
     message(STATUS "VTK ${VTK_VERSION} found - building nasagui_vtk_demo")
     add_executable(nasagui_vtk_demo
         demo-vtk/main.cpp
+        demo-vtk/ColorMaps.h
+        demo-vtk/ColorMaps.cpp
+        demo-vtk/MeshUtils.h
+        demo-vtk/MeshUtils.cpp
+        demo-vtk/SceneObject.h
         demo-vtk/TSurfReader.h
-        demo-vtk/TSurfReader.cpp)
+        demo-vtk/TSurfReader.cpp
+        demo-vtk/VtkExplorerWindow.h
+        demo-vtk/VtkExplorerWindow.cpp)
     target_link_libraries(nasagui_vtk_demo PRIVATE nasagui ${VTK_LIBRARIES})
     vtk_module_autoinit(TARGETS nasagui_vtk_demo MODULES ${VTK_LIBRARIES})
 else()

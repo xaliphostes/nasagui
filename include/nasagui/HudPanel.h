@@ -20,7 +20,9 @@ public:
     void setTitle(const QString &title);
     QString title() const { return m_title; }
 
+    // An invalid colour (the default) follows the current style's Theme::Primary.
     void setAccent(const QColor &accent);
+    QColor accent() const;
 
     void setClosable(bool closable);
     bool isClosable() const { return m_closable; }
@@ -28,6 +30,8 @@ public:
 public slots:
     void closePanel();   // animated collapse, then hide() + panelClosed()
     void openPanel();    // show() + animated expand, then panelOpened()
+    // animate=false jumps to the final state (used when restoring a layout)
+    void setPanelOpen(bool open, bool animate = true);
 
 signals:
     void panelClosed();

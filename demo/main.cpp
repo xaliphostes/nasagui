@@ -4,6 +4,7 @@
 #include <nasagui/Controls.h>
 #include <nasagui/HudButton.h>
 #include <nasagui/HudPanel.h>
+#include <nasagui/LayoutStore.h>
 #include <nasagui/ModelView.h>
 #include <nasagui/RadarScope.h>
 #include <nasagui/StatusIndicator.h>
@@ -22,7 +23,9 @@
 #include <QLabel>
 #include <QPainter>
 #include <QPlainTextEdit>
+#include <QCloseEvent>
 #include <QRandomGenerator>
+#include <QSettings>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QtMath>
@@ -46,9 +49,21 @@ public:
         m_logTimer.start(2200);
         updateClock();
         appendLog();
+
+        // Plain QLabels/stylesheets cache their colors, so refresh them
+        // whenever the user picks another style.
+        connect(Theme::Notifier::instance(), &Theme::Notifier::styleChanged,
+                this, [this] { applyThemeColors(); });
+        applyThemeColors();
     }
 
     const QVector<HudPanel *> &panels() const { return m_hudPanels; }
+
+    void saveLayoutNow()
+    {
+        QSettings settings;
+        saveLayout(settings, this);
+    }
 
     CollapsibleDock *dock(CollapsibleDock::Edge edge) const
     {
@@ -62,6 +77,12 @@ public:
     }
 
 protected:
+    void closeEvent(QCloseEvent *event) override
+    {
+        saveLayoutNow();
+        QWidget::closeEvent(event);
+    }
+
     // Faint dot grid over the whole background
     void paintEvent(QPaintEvent *) override
     {
@@ -114,12 +135,9 @@ private:
 
         // ---- Header bar -----------------------------------------------------
         auto *header = new QHBoxLayout;
-        auto *title = new QLabel("MISSION OPERATIONS // ARES-V CONSOLE");
-        title->setFont(Theme::titleFont(15));
-        QPalette tp = title->palette();
-        tp.setColor(QPalette::WindowText, Theme::Primary);
-        title->setPalette(tp);
-        header->addWidget(title);
+        m_title = new QLabel("MISSION OPERATIONS // ARES-V CONSOLE");
+        m_title->setFont(Theme::titleFont(15));
+        header->addWidget(m_title);
         header->addSpacing(24);
         header->addWidget(buildOpsMenuButton());
         header->addStretch();
@@ -131,9 +149,6 @@ private:
 
         m_utcLabel = new QLabel;
         m_utcLabel->setFont(Theme::valueFont(13));
-        QPalette up = m_utcLabel->palette();
-        up.setColor(QPalette::WindowText, Theme::TextDim);
-        m_utcLabel->setPalette(up);
         header->addWidget(m_utcLabel);
         root->addLayout(header);
 
@@ -165,13 +180,8 @@ private:
         // ---- Bottom dock: event log -----------------------------------------
         m_bottomDock = new CollapsibleDock(CollapsibleDock::Edge::Bottom, "Event Log / Config");
         m_bottomDock->setExpandedSize(200);
-        auto *bottom = new QWidget;
-        auto *bottomLay = new QHBoxLayout(bottom);
-        bottomLay->setContentsMargins(0, 0, 0, 0);
-        bottomLay->setSpacing(10);
-        bottomLay->addWidget(buildLogPanel(), 1);
-        bottomLay->addWidget(buildConfigPanel());
-        m_bottomDock->setContent(bottom);
+        m_bottomDock->setContent(buildLogPanel());
+        m_bottomDock->setContent(buildConfigPanel());
         root->addWidget(m_bottomDock);
 
         populatePanelsMenu();
@@ -187,9 +197,7 @@ private:
         m_panelsMenu = new HudMenu("Panels", menu);   // stays open while toggling
         menu->addMenu(m_panelsMenu);
         menu->addSeparator();
-        auto *night = menu->addAction("Night Mode");
-        night->setCheckable(true);
-        night->setChecked(true);
+        menu->addMenu(buildStyleMenu(menu));
         auto *rate = menu->addMenu("Uplink Rate");
         auto *group = new QActionGroup(menu);
         for (const char *r : {"32 kbps", "128 kbps", "1 Mbps"}) {
@@ -205,6 +213,59 @@ private:
             menu->popup(ops->mapToGlobal(QPoint(0, ops->height() + 4)));
         });
         return ops;
+    }
+
+    // Radio-style list of every style the theme offers; the choice is
+    // remembered across runs.
+    QMenu *buildStyleMenu(QWidget *parent)
+    {
+        auto *styleMenu = new QMenu("Style", parent);
+        auto *group = new QActionGroup(styleMenu);
+        for (Theme::Style style : Theme::styles()) {
+            QAction *act = styleMenu->addAction(Theme::styleName(style));
+            act->setCheckable(true);
+            act->setChecked(style == Theme::style());
+            group->addAction(act);
+            connect(act, &QAction::triggered, this, [style] {
+                setApplicationStyle(style);
+                QSettings().setValue("style", Theme::styleName(style));
+            });
+        }
+        return styleMenu;
+    }
+
+    // Re-apply every theme color this window caches outside of a paintEvent().
+    void applyThemeColors()
+    {
+        const auto setTextColor = [](QWidget *w, const QColor &color) {
+            QPalette pal = w->palette();
+            pal.setColor(QPalette::WindowText, color);
+            w->setPalette(pal);
+        };
+
+        setTextColor(m_title, Theme::Primary);
+        setTextColor(m_metLabel, Theme::TextPrimary);
+        setTextColor(m_utcLabel, Theme::TextDim);
+
+        for (QLabel *sep : m_timelineSeparators)
+            setTextColor(sep, Theme::TextDim);
+        for (int i = 0; i < m_timelinePhases.size(); ++i)
+            setTextColor(m_timelinePhases[i],
+                         i == kActivePhase
+                             ? Theme::Primary
+                             : (i < kActivePhase ? Theme::TextPrimary
+                                                 : Theme::TextDim));
+
+        // Log text sits one notch above the dim text, whichever way "up" is.
+        const QColor logColor = Theme::style() == Theme::Style::Daylight
+            ? Theme::TextDim.darker(125)
+            : Theme::TextDim.lighter(125);
+        m_log->setStyleSheet(
+            QStringLiteral("QPlainTextEdit { background: transparent; "
+                           "border: none; color: %1; }")
+                .arg(logColor.name()));
+        m_abort->setAccent(Theme::Alert);
+        update();
     }
 
     QWidget *buildConfigPanel()
@@ -282,29 +343,22 @@ private:
         auto *panel = registerPanel(new HudPanel("Mission Timeline"));
         auto *lay = new QHBoxLayout(panel);
         const char *phases[] = {"Launch", "Ascent", "Orbit", "Trans-Mars", "EDL"};
-        const int active = 2;
         lay->addStretch();
         for (int i = 0; i < 5; ++i) {
             if (i > 0) {
                 auto *sep = new QLabel(QString::fromUtf8("▸"));
-                QPalette sp = sep->palette();
-                sp.setColor(QPalette::WindowText, Theme::TextDim);
-                sep->setPalette(sp);
+                m_timelineSeparators.append(sep);
                 lay->addWidget(sep);
                 lay->addSpacing(18);
             }
             auto *phase = new QLabel(QString(phases[i]).toUpper());
-            phase->setFont(Theme::titleFont(i == active ? 12 : 10));
-            QPalette pp = phase->palette();
-            pp.setColor(QPalette::WindowText,
-                        i == active ? Theme::Primary
-                                    : (i < active ? Theme::TextPrimary : Theme::TextDim));
-            phase->setPalette(pp);
+            phase->setFont(Theme::titleFont(i == kActivePhase ? 12 : 10));
+            m_timelinePhases.append(phase);
             lay->addWidget(phase);
             lay->addSpacing(18);
         }
         lay->addStretch();
-        return panel;
+        return panel;   // colors come from applyThemeColors()
     }
 
     QWidget *buildPropulsionPanel()
@@ -345,20 +399,17 @@ private:
 
     QWidget *buildCenterColumn()
     {
-        auto *center = new QWidget;
-        auto *lay = new QVBoxLayout(center);
-        lay->setContentsMargins(0, 0, 0, 0);
-        lay->setSpacing(10);
-
-        auto *topRow = new QHBoxLayout;
-        topRow->setSpacing(10);
+        // Telemetry | Model are split horizontally; that row and Systems
+        // vertically — all separations draggable.
+        auto *topSplit = new HudSplitter(Qt::Horizontal);
+        auto *centerSplit = new HudSplitter(Qt::Vertical);
 
         auto *telemetry = registerPanel(new HudPanel("Telemetry // Altitude"));
         auto *telLay = new QVBoxLayout(telemetry);
         m_plot = new TelemetryPlot;
         m_plot->setUnits("KM");
         telLay->addWidget(m_plot);
-        topRow->addWidget(telemetry, 1);
+        topSplit->addWidget(telemetry);
 
         auto *model = registerPanel(new HudPanel("Model // Stanford Bunny"));
         auto *modelLay = new QVBoxLayout(model);
@@ -406,9 +457,8 @@ private:
         modelBar->addWidget(cmap);
         modelBar->addStretch();
         modelLay->addLayout(modelBar);
-        topRow->addWidget(model, 1);
-
-        lay->addLayout(topRow, 1);
+        topSplit->addWidget(model);
+        centerSplit->addWidget(topSplit);
 
         auto *systems = registerPanel(new HudPanel("Systems"));
         auto *sysLay = new QVBoxLayout(systems);
@@ -433,16 +483,17 @@ private:
         auto *buttons = new QHBoxLayout;
         auto *arm = new HudButton("Arm");
         arm->setCheckable(true);
-        auto *abort = new HudButton("Abort");
-        abort->setAccent(Theme::Alert);
+        m_abort = new HudButton("Abort");
         buttons->addWidget(arm);
         buttons->addWidget(new HudButton("Stage"));
         buttons->addWidget(new HudButton("Comms"));
         buttons->addStretch();
-        buttons->addWidget(abort);
+        buttons->addWidget(m_abort);
         sysLay->addLayout(buttons);
-        lay->addWidget(systems);
-        return center;
+        centerSplit->addWidget(systems);
+        centerSplit->setStretchFactor(0, 1);   // extra space goes to the top row
+        centerSplit->setStretchFactor(1, 0);
+        return centerSplit;
     }
 
     QWidget *buildRadarPanel()
@@ -478,9 +529,7 @@ private:
         m_log->setReadOnly(true);
         m_log->setFrameStyle(QFrame::NoFrame);
         m_log->setFont(Theme::valueFont(9));
-        m_log->setStyleSheet(
-            "QPlainTextEdit { background: transparent; border: none; color: #8fb3c4; }");
-        lay->addWidget(m_log);
+        lay->addWidget(m_log);   // colors come from applyThemeColors()
         return panel;
     }
 
@@ -526,6 +575,8 @@ private:
             QDateTime::currentDateTimeUtc().toString("hh:mm:ss") + "  " + msg);
     }
 
+    static constexpr int kActivePhase = 2;   // "Orbit"
+
     QTimer m_dataTimer, m_clockTimer, m_logTimer;
     double m_t = 0.0;
     int m_elapsed = 0;
@@ -545,21 +596,45 @@ private:
     BarGauge *m_reserves[3] = {};
     TelemetryPlot *m_plot = nullptr;
     QPlainTextEdit *m_log = nullptr;
+    QLabel *m_title = nullptr;
     QLabel *m_metLabel = nullptr;
     QLabel *m_utcLabel = nullptr;
+    QVector<QLabel *> m_timelineSeparators;
+    QVector<QLabel *> m_timelinePhases;
+    HudButton *m_abort = nullptr;
 };
 
 int main(int argc, char *argv[])
 {
     ModelView::setDefaultSurfaceFormat();   // before QApplication
     QApplication app(argc, argv);
-    applyTheme(app);
+    QApplication::setOrganizationName("nasagui");
+    QApplication::setApplicationName("mission-demo");
+
+    // Style: --theme <name> wins over the one remembered from the last run.
+    // (Qt itself swallows "--style", hence the different spelling.)
+    {
+        const QStringList args = app.arguments();
+        const int styleIdx = args.indexOf("--theme");
+        const QString name = styleIdx >= 0 && styleIdx + 1 < args.size()
+            ? args.at(styleIdx + 1)
+            : QSettings().value("style").toString();
+        applyTheme(app, Theme::styleFromName(name));
+    }
 
     MissionWindow window;
+    {
+        QSettings settings;
+        if (app.arguments().contains("--reset-layout"))
+            settings.remove("layout");
+        else
+            restoreLayout(settings, &window);
+    }
     window.show();
 
     // Headless verification: --snapshot <file.png> renders and exits;
-    // add --collapse to snapshot with left/bottom docks collapsed.
+    // add --collapse to snapshot with left/bottom docks collapsed, or
+    // --style-test to snapshot after a live switch to the Daylight style.
     const QStringList args = app.arguments();
     const int idx = args.indexOf("--snapshot");
     if (idx >= 0 && idx + 1 < args.size()) {
@@ -580,8 +655,14 @@ int main(int argc, char *argv[])
                 window.dock(CollapsibleDock::Edge::Bottom)->setExpanded(false);
             });
         }
+        if (args.contains("--style-test")) {
+            QTimer::singleShot(1200, &app, [] {
+                setApplicationStyle(Theme::Style::Daylight);
+            });
+        }
         QTimer::singleShot(2000, &app, [&window, path] {
             window.grab().save(path);
+            window.saveLayoutNow();   // quit() skips closeEvent
             QApplication::quit();
         });
     }

@@ -10,7 +10,6 @@ namespace nasagui {
 HudPanel::HudPanel(const QString &title, QWidget *parent)
     : QWidget(parent)
     , m_title(title)
-    , m_accent(Theme::Primary)
 {
     setContentsMargins(14, m_title.isEmpty() ? 14 : 40, 14, 14);
 
@@ -43,6 +42,11 @@ void HudPanel::setAccent(const QColor &accent)
 {
     m_accent = accent;
     update();
+}
+
+QColor HudPanel::accent() const
+{
+    return m_accent.isValid() ? m_accent : Theme::Primary;
 }
 
 void HudPanel::setClosable(bool closable)
@@ -80,6 +84,27 @@ void HudPanel::openPanel()
     m_sizeAnim->setStartValue(0);
     m_sizeAnim->setEndValue(sizeHint().height());
     m_sizeAnim->start();
+}
+
+void HudPanel::setPanelOpen(bool open, bool animate)
+{
+    if (animate) {
+        if (open)
+            openPanel();
+        else
+            closePanel();
+        return;
+    }
+    m_sizeAnim->stop();
+    m_closing = false;
+    setMaximumHeight(QWIDGETSIZE_MAX);
+    if (open == !isHidden())
+        return;
+    setVisible(open);
+    if (open)
+        emit panelOpened();
+    else
+        emit panelClosed();
 }
 
 void HudPanel::mousePressEvent(QMouseEvent *event)
@@ -121,6 +146,7 @@ void HudPanel::paintEvent(QPaintEvent *)
     p.setRenderHint(QPainter::Antialiasing);
 
     const QRectF r = QRectF(rect()).adjusted(1.5, 1.5, -1.5, -1.5);
+    const QColor accentColor = accent();
 
     p.fillRect(r, Theme::PanelFill);
     p.setPen(QPen(Theme::PanelBorder, 1.0));
@@ -128,7 +154,7 @@ void HudPanel::paintEvent(QPaintEvent *)
 
     // Corner brackets
     const qreal len = 14.0;
-    p.setPen(QPen(m_accent, 2.0));
+    p.setPen(QPen(accentColor, 2.0));
     const QPointF tl = r.topLeft(), tr = r.topRight();
     const QPointF bl = r.bottomLeft(), br = r.bottomRight();
     p.drawPolyline(QPolygonF{{tl.x(), tl.y() + len}, tl, {tl.x() + len, tl.y()}});
@@ -138,7 +164,7 @@ void HudPanel::paintEvent(QPaintEvent *)
 
     if (!m_title.isEmpty()) {
         // Header: accent tick, title, separator line
-        p.fillRect(QRectF(r.left() + 12, r.top() + 12, 3, 12), m_accent);
+        p.fillRect(QRectF(r.left() + 12, r.top() + 12, 3, 12), accentColor);
         p.setPen(Theme::TextPrimary);
         p.setFont(Theme::titleFont(10));
         p.drawText(QRectF(r.left() + 22, r.top() + 8, r.width() - 56, 20),

@@ -2,24 +2,59 @@
 
 #include <QColor>
 #include <QFont>
+#include <QObject>
+#include <QString>
+#include <QVector>
 
 class QPainter;
 class QPainterPath;
 
 namespace nasagui::Theme {
 
+// ---- Styles ----------------------------------------------------------------
+// The palette below is mutable: picking a style rewrites it in place, so every
+// widget that reads Theme::Xxx at paint time follows along automatically.
+enum class Style {
+    MissionControl,   // deep-space console (default)
+    Daylight,         // same design language, lighter: pale deck, ink text
+};
+
+Style style();
+void setStyle(Style style);
+
+QVector<Style> styles();                  // all styles, in menu order
+QString styleName(Style style);           // human readable, e.g. "Mission Control"
+Style styleFromName(const QString &name,  // inverse of styleName()
+                    Style fallback = Style::MissionControl);
+
+// Emits styleChanged() after every setStyle(). Widgets that cache a theme
+// colour (in a QPalette, a stylesheet, a renderer…) should reapply it here.
+class Notifier : public QObject
+{
+    Q_OBJECT
+public:
+    static Notifier *instance();
+
+signals:
+    void styleChanged();
+};
+
 // ---- Palette ---------------------------------------------------------------
-const QColor Background {0x06, 0x0b, 0x12};        // deep space blue-black
-const QColor PanelFill  {0x0a, 0x14, 0x1f, 215};   // translucent panel body
-const QColor PanelBorder{0x1d, 0x3a, 0x4d};
-const QColor GridLine   {0x14, 0x2a, 0x3a};
-const QColor Primary    {0x35, 0xd6, 0xed};        // NASA cyan
-const QColor PrimaryDim {0x1a, 0x6d, 0x85};
-const QColor Accent     {0xff, 0x9f, 0x1c};        // Martian amber
-const QColor Alert      {0xff, 0x4d, 0x4d};
-const QColor Ok         {0x3d, 0xe0, 0x8a};
-const QColor TextPrimary{0xd7, 0xe7, 0xef};
-const QColor TextDim    {0x6f, 0x8a, 0x99};
+extern QColor Background;    // window / viewport backdrop
+extern QColor PanelFill;     // translucent panel body
+extern QColor FieldFill;     // input, check box and combo box background
+extern QColor PanelBorder;
+extern QColor GridLine;
+extern QColor Primary;       // accent used by gauges, sliders, highlights
+extern QColor PrimaryDim;
+extern QColor Accent;        // secondary accent (caution)
+extern QColor Alert;
+extern QColor Ok;
+extern QColor TextPrimary;
+extern QColor TextDim;
+
+// Halo intensity of drawGlowPath(); light styles need a fainter glow.
+extern qreal GlowStrength;
 
 // ---- Fonts -----------------------------------------------------------------
 QFont titleFont(int pointSize = 11);   // condensed, letter-spaced headers

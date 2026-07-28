@@ -2,8 +2,9 @@
 
 A Qt 6 / C++17 widget framework for building NASA / sci-fi mission-control
 interfaces (inspired by modern NASA dashboard concepts and Territory Studio's
-*The Martian* screen graphics): dark space-blue background, glowing cyan
-primaries, amber warnings, corner-bracketed panels and monospaced readouts.
+*The Martian* screen graphics): glowing cyan primaries, amber warnings,
+corner-bracketed panels and monospaced readouts — on a dark space-blue
+background, or on the lighter *Daylight* style (see [Styles](#styles)).
 
 <center>
     <img src="media/screen.jpg" width="800"/><br>
@@ -26,7 +27,7 @@ OpenGL context, so the 3D viewport stays empty there.)
 | Widget            | Purpose                                                        |
 |-------------------|----------------------------------------------------------------|
 | `HudPanel`        | Container with translucent fill, corner brackets and a header. `setClosable(true)` adds a ✕ that collapses the panel shut (animated); `openPanel()` expands it back; `panelClosed`/`panelOpened` signals keep menus in sync. |
-| `CollapsibleDock` | Edge-anchored collapsible container (Left/Right/Top/Bottom) with an always-visible toggle strip and animated slide. |
+| `CollapsibleDock` | Edge-anchored collapsible container (Left/Right/Top/Bottom) with an always-visible toggle strip and animated slide. Panels added via repeated `setContent()` are separated by draggable `HudSplitter` handles. |
 | `CircularGauge`   | 270° arc gauge with ticks, glow arc and central readout.       |
 | `BarGauge`        | Vertical segmented level bar (fuel / O2 style).                |
 | `TelemetryPlot`   | Scrolling time-series with grid, glow stroke and gradient fill.|
@@ -48,7 +49,7 @@ Drop-in replacements for the standard Qt controls — same API, HUD look:
 | `HudSlider`      | `QSlider`        | Horizontal; glowing fill, bar handle, click-to-jump. |
 | `HudSpinBox`     | `QDoubleSpinBox` | Chevron up/down zones; `setDecimals(0)` for ints (default). |
 | `HudDial`        | `QDial`          | Mini-gauge look: track, glow arc, needle.    |
-| `HudLabel`       | `QLabel`         | Typographic roles: `Title`, `Caption`, `Value`, `Unit`; `setAccent()` recolors. |
+| `HudLabel`       | `QLabel`         | Typographic roles: `Title`, `Caption`, `Value`, `Unit`; `setAccent()` recolors, `setPointSize()` resizes; follows style changes. |
 
 `QMenu`, `QMenuBar` and the `QComboBox` popup are styled globally by
 `applyTheme()` — plain `menu->addAction(...)` code gets the HUD look for free
@@ -64,7 +65,8 @@ Drop-in replacements for the standard Qt controls — same API, HUD look:
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
-    nasagui::applyTheme(app);          // dark palette + stylesheet, once
+    nasagui::applyTheme(app);          // palette + stylesheet, once
+                                       // (add a Theme::Style to start lighter)
 
     auto *panel = new nasagui::HudPanel("Propulsion");
     auto *layout = new QHBoxLayout(panel);
@@ -98,6 +100,11 @@ middleLayout->addWidget(left);       // then addWidget(centralWidget, 1), right 
 
 left->setExpanded(false);            // programmatic collapse; toggle() also works
 ```
+
+The strip doubles as a resize divider: **click** toggles the dock, **drag**
+resizes it (the two are separated by the platform drag threshold; the cursor
+switches to a split cursor while the dock is expanded). Multiple panels
+inside one dock are separated by draggable `HudSplitter` handles.
 
 ### Closable panels + show/hide menu
 
@@ -176,13 +183,90 @@ cmake --build build-vtk -j8
 (The plain `build/` dir can keep using Qt 6.8.3; mixing two Qt versions in
 one process is not possible, hence the separate build directory.)
 
+## Layout persistence
+
+`LayoutStore.h` saves and restores the whole layout — splitter positions,
+dock expanded/collapsed state and sizes, closed panels — via `QSettings`:
+
+```cpp
+// main(): give QSettings a home, restore after the UI is built, save on close
+QApplication::setOrganizationName("nasagui");
+QApplication::setApplicationName("mission-demo");
+...
+QSettings settings;
+nasagui::restoreLayout(settings, &window);   // before show()
+window.show();
+
+// in the window class:
+void closeEvent(QCloseEvent *e) override {
+    QSettings settings;
+    nasagui::saveLayout(settings, this);
+    QWidget::closeEvent(e);
+}
+```
+
+Widgets are keyed by objectName/title + traversal index; give panels with
+duplicate titles an `objectName`. Both demos support `--reset-layout` to
+clear the saved state and start from the default layout.
+
 ## Theming
 
 All colors and fonts live in `include/nasagui/Theme.h`
-(`Background`, `Primary` cyan, `Accent` amber, `Alert`, `Ok`, …).
-Change them there to re-skin every widget at once.
-`Theme::drawGlowPath()` is the shared neon-glow stroke helper if you write
-your own widgets.
+(`Background`, `PanelFill`, `FieldFill`, `Primary`, `Accent`, `Alert`, `Ok`, …).
+Widgets read them at paint time, so rewriting the palette re-skins everything
+at once. `Theme::drawGlowPath()` is the shared neon-glow stroke helper if you
+write your own widgets.
+
+### Styles
+
+Two palettes ship with the library, same design language, different weight:
+
+| `Theme::Style`         | Name              | Look                                        |
+|------------------------|-------------------|---------------------------------------------|
+| `Style::MissionControl`| `Mission Control` | The original: cyan on deep space blue-black. |
+| `Style::Daylight`      | `Daylight`        | Lighter: white panels on a pale deck, teal primary, ink text, softened glow. |
+
+Pick one at startup and switch at any time:
+
+```cpp
+#include <nasagui/Style.h>
+
+nasagui::applyTheme(app, nasagui::Theme::Style::Daylight);   // instead of applyTheme(app)
+...
+nasagui::setApplicationStyle(nasagui::Theme::Style::MissionControl);   // live switch
+```
+
+`setApplicationStyle()` rewrites the palette, re-applies the application
+palette/stylesheet and repaints every widget. To build a menu or combo box of
+the available styles, iterate `Theme::styles()` and label the entries with
+`Theme::styleName()` (`Theme::styleFromName()` is the inverse, handy for
+`QSettings`):
+
+```cpp
+for (Theme::Style style : Theme::styles()) {
+    QAction *act = styleMenu->addAction(Theme::styleName(style));
+    act->setCheckable(true);
+    act->setChecked(style == Theme::style());
+    group->addAction(act);
+    QObject::connect(act, &QAction::triggered, [style] {
+        nasagui::setApplicationStyle(style);
+    });
+}
+```
+
+Widgets that read the theme in `paintEvent()` (all of them, plus `HudLabel`)
+follow along by themselves. If your own code caches a theme color somewhere
+else — a `QPalette`, a stylesheet, a 3D renderer's background — reapply it on
+`Theme::Notifier::instance()`'s `styleChanged()` signal:
+
+```cpp
+connect(Theme::Notifier::instance(), &Theme::Notifier::styleChanged,
+        this, [this] { applyThemeColors(); });
+```
+
+Both demos expose the choice and remember it across runs — mission demo:
+*Ops ▸ Style*, VTK demo: the **Style** combo box in the header. `--theme
+"Daylight"` selects one from the command line (Qt itself takes `--style`).
 
 ## Notes
 

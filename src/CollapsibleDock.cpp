@@ -1,7 +1,9 @@
 #include "nasagui/CollapsibleDock.h"
+#include "nasagui/Controls.h"
 #include "nasagui/HudPanel.h"
 #include "nasagui/Theme.h"
 
+#include <QApplication>
 #include <QBoxLayout>
 #include <QMouseEvent>
 #include <QPainter>
@@ -25,7 +27,12 @@ CollapsibleDock::CollapsibleDock(Edge edge, const QString &title, QWidget *paren
     m_contentArea = new QWidget(this);
     auto *inner = new QVBoxLayout(m_contentArea);
     inner->setContentsMargins(0, 0, 0, 0);
-    inner->setSpacing(10);
+    inner->setSpacing(0);
+    // Left/Right docks stack their panels vertically, Top/Bottom docks place
+    // them side by side; the splitter makes the separations draggable.
+    m_splitter = new HudSplitter(
+        collapsesHorizontally() ? Qt::Vertical : Qt::Horizontal, m_contentArea);
+    inner->addWidget(m_splitter);
 
     m_strip = new DockStrip(this);
 
@@ -54,8 +61,7 @@ CollapsibleDock::CollapsibleDock(Edge edge, const QString &title, QWidget *paren
 
 void CollapsibleDock::setContent(QWidget *content)
 {
-    content->setParent(m_contentArea);
-    m_contentArea->layout()->addWidget(content);
+    m_splitter->addWidget(content);
     watchPanels(content);
 }
 
@@ -110,6 +116,17 @@ void CollapsibleDock::setExpanded(bool expanded)
     emit expandedChanged(m_expanded);
 }
 
+void CollapsibleDock::setExpandedImmediate(bool expanded)
+{
+    m_anim->stop();
+    const bool changed = (m_expanded != expanded);
+    m_expanded = expanded;
+    applySize(expanded ? m_expandedSize : 0);
+    m_strip->update();
+    if (changed)
+        emit expandedChanged(expanded);
+}
+
 void CollapsibleDock::applySize(int px)
 {
     if (collapsesHorizontally())
@@ -130,14 +147,72 @@ DockStrip::DockStrip(CollapsibleDock *dock)
         setFixedWidth(kStripThickness);
     else
         setFixedHeight(kStripThickness);
-    setCursor(Qt::PointingHandCursor);
+    updateCursor();
+    connect(dock, &CollapsibleDock::expandedChanged, this, [this] {
+        updateCursor();
+        update();
+    });
     setToolTip(dock->title());
+}
+
+void DockStrip::updateCursor()
+{
+    const bool vertical = m_dock->edge() == CollapsibleDock::Edge::Left
+                       || m_dock->edge() == CollapsibleDock::Edge::Right;
+    // Expanded: the strip doubles as a resize divider. Collapsed: click-only.
+    if (m_dock->isExpanded())
+        setCursor(vertical ? Qt::SplitHCursor : Qt::SplitVCursor);
+    else
+        setCursor(Qt::PointingHandCursor);
 }
 
 void DockStrip::mousePressEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::LeftButton)
-        m_dock->toggle();
+    if (event->button() != Qt::LeftButton)
+        return;
+    // Don't toggle yet: wait for the release to see if this was a drag.
+    m_pressed = true;
+    m_dragging = false;
+    m_pressGlobal = event->globalPosition().toPoint();
+    m_pressSize = m_dock->expandedSize();
+    event->accept();
+}
+
+void DockStrip::mouseMoveEvent(QMouseEvent *event)
+{
+    if (!m_pressed || !m_dock->isExpanded())
+        return;
+    const QPoint delta = event->globalPosition().toPoint() - m_pressGlobal;
+    if (!m_dragging
+        && delta.manhattanLength() < QApplication::startDragDistance())
+        return;   // still within the click tolerance
+    m_dragging = true;
+
+    using Edge = CollapsibleDock::Edge;
+    int grow = 0;
+    switch (m_dock->edge()) {
+    case Edge::Left:   grow = delta.x();  break;
+    case Edge::Right:  grow = -delta.x(); break;
+    case Edge::Top:    grow = delta.y();  break;
+    case Edge::Bottom: grow = -delta.y(); break;
+    }
+    const bool vertical = m_dock->edge() == Edge::Left
+                       || m_dock->edge() == Edge::Right;
+    const int maxSize = (vertical ? m_dock->window()->width()
+                                  : m_dock->window()->height()) - 160;
+    m_dock->setExpandedSize(qBound(80, m_pressSize + grow, qMax(120, maxSize)));
+    event->accept();
+}
+
+void DockStrip::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event->button() != Qt::LeftButton)
+        return;
+    if (m_pressed && !m_dragging)
+        m_dock->toggle();   // plain click
+    m_pressed = false;
+    m_dragging = false;
+    event->accept();
 }
 
 void DockStrip::enterEvent(QEnterEvent *) { update(); }

@@ -9,6 +9,7 @@
 #include <QMenu>
 #include <QRadioButton>
 #include <QSlider>
+#include <QSplitter>
 
 // Interactive form controls in the nasagui HUD style. All of them are drop-in
 // replacements for their Qt base class (same signals, slots and API).
@@ -43,7 +44,7 @@ protected:
     void leaveEvent(QEvent *event) override;
 };
 
-// Dark field with chevron; the popup list is styled by applyTheme().
+// Filled field with chevron; the popup list is styled by applyTheme().
 class HudComboBox : public QComboBox
 {
     Q_OBJECT
@@ -122,7 +123,20 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
 };
 
-// QLabel preconfigured for a typographic role of the theme.
+// QSplitter with a HUD-styled grip handle. CollapsibleDock uses one between
+// its stacked panels, so their separation is draggable; also fine standalone.
+class HudSplitter : public QSplitter
+{
+    Q_OBJECT
+public:
+    explicit HudSplitter(Qt::Orientation orientation, QWidget *parent = nullptr);
+
+protected:
+    QSplitterHandle *createHandle() override;
+};
+
+// QLabel preconfigured for a typographic role of the theme. It repaints itself
+// with the new colors whenever the application style changes.
 class HudLabel : public QLabel
 {
     Q_OBJECT
@@ -134,12 +148,14 @@ public:
 
     void setRole(Role role);
     void setAccent(const QColor &color);   // overrides the role color
+    void setPointSize(int pointSize);      // 0 = the role's default size
 
 private:
     void apply();
 
     Role m_role;
     QColor m_accent;      // invalid = use role color
+    int m_pointSize = 0;  // 0 = role default
 };
 
 } // namespace nasagui
